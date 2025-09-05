@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
-from typing import Callable, Dict, List, Mapping, Set, Tuple
+from typing import Callable, Dict, List, Mapping, Set, Tuple, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
@@ -516,6 +516,7 @@ def make_online_policy_from_primal(
     constraint_sets: Dict[AttributeId, Tuple[float, Set[TypeKey]]],
     rng: random.Random,
     enable_neither_wiggle: bool = False,
+    reserve_trigger_n: Optional[int] = None,
 ):
     """
     Create online policy using primal LP rates r_t.
@@ -535,6 +536,9 @@ def make_online_policy_from_primal(
         R = N - state['n']
         r_need = {a: max(0, math.ceil(alpha * N) - state['c'][a]) for a, (alpha, _) in constraint_sets.items()}
         forced_mode = (sum(r_need.values()) >= R) or any(v == R for v in r_need.values())
+        # Engage reserve mode early once we have spent the budget implied by A_max
+        if reserve_trigger_n is not None and state['n'] >= reserve_trigger_n:
+            forced_mode = True
 
         if forced_mode:
             helps = any(r_need[a] > 0 and attrs.get(a, False) for a in constraint_sets)

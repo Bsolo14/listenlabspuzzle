@@ -14,6 +14,7 @@ from .strategy import (
     make_online_policy_from_primal,
     multiplicative_weights_lp,
     solve_lp_primal,
+    correlate_binary_joint_vectorized_parallel,
 )
 
 
@@ -25,19 +26,13 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
     constraints_min_count = {c.attribute: c.minCount for c in init.constraints}
 
     attribute_order = build_attribute_order_constrained(init.relativeFrequencies, constraints_min_count)
-    # Use simple independence assumption for joint distribution - no sampling needed
-    # Since the API provides exact marginal frequencies, we can assume independence
-    # and compute joint probabilities as product of marginals
-    from itertools import product
-    type_probs = {}
-    for type_tuple in product([0, 1], repeat=len(attribute_order)):
-        # Compute joint probability assuming independence
-        prob = 1.0
-        for i, attr in enumerate(attribute_order):
-            has_attr = type_tuple[i] == 1
-            marginal_prob = init.relativeFrequencies[attr] if has_attr else (1.0 - init.relativeFrequencies[attr])
-            prob *= marginal_prob
-        type_probs[type_tuple] = prob
+    # Build joint distribution using provided correlations via Gaussian copula
+    type_probs = correlate_binary_joint_vectorized_parallel(
+        attribute_order=attribute_order,
+        relative_frequencies=init.relativeFrequencies,
+        correlations=init.correlations,
+        num_samples=150000,
+    )
 
     # Use the original constraints (no marginal capping). LP will throttle types as needed.
     constraint_sets = compute_constraint_sets(attribute_order, constraints_min_count, N)
@@ -107,6 +102,18 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
             print(f"  {attrs or ['none']}: freq={freq:.4f}, accept={accept_prob:.3f}")
 
     if use_lp:
+        # Compute reserve trigger from A_max = min_j p(attr_j)/alpha_j
+        # p(attr_j) under joint equals sum of type_probs over types containing attr_j
+        attr_prob = {}
+        for attr, (alpha, S) in constraint_sets.items():
+            attr_prob[attr] = sum(type_probs[t] for t in S)
+        A_max_candidates = []
+        for attr, (alpha, _) in constraint_sets.items():
+            if alpha > 0:
+                A_max_candidates.append(attr_prob[attr] / alpha)
+        A_max = min(A_max_candidates) if A_max_candidates else 1.0
+        reserve_trigger_n = int(max(0, min(N, math.floor(A_max * N))))
+
         # Set fixed seed for reproducible LP results
         rng = random.Random(42)
         step, policy_state = make_online_policy_from_primal(
@@ -115,6 +122,7 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
             r_by_type=base_accept,
             constraint_sets=constraint_sets,
             rng=rng,
+            reserve_trigger_n=reserve_trigger_n,
         )
     else:
         step, policy_state = make_online_policy(
