@@ -6,3 +6,4 @@ __pycache__/
 *.pyw
 *.pyz
 *.py
+bba_cli/__pycache__/

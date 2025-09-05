@@ -16,6 +16,7 @@ from bba_cli.strategy import (
     correlate_binary_joint_parallel,
     correlate_binary_joint_vectorized_parallel,
     build_attribute_order,
+    build_attribute_order_constrained,
     compute_constraint_sets,
     multiplicative_weights_lp
 )
@@ -195,7 +196,6 @@ def test_full_algorithm_pipeline():
     print("🔬 Testing full algorithm pipeline...")
 
     # Mock game initialization data
-    attribute_order = ["local", "black", "regular", "cool"]
     relative_frequencies = {
         "local": 0.6,
         "black": 0.4,
@@ -215,6 +215,10 @@ def test_full_algorithm_pipeline():
         {"attribute": "black", "minCount": 300},
         {"attribute": "regular", "minCount": 200}
     ]
+
+    # Use constrained attribute order (only constrained attributes)
+    constraints_min_count = {c["attribute"]: c["minCount"] for c in constraints}
+    attribute_order = build_attribute_order_constrained(relative_frequencies, constraints_min_count)
 
     N = 1000
     num_samples = 25000
@@ -241,7 +245,7 @@ def test_full_algorithm_pipeline():
 
         # Verify we get reasonable results
         total_acceptance = sum(type_probs[t] * base_accept.get(t, 0.0) for t in type_probs)
-        if not (0.1 <= total_acceptance <= 0.9):  # Should be reasonable acceptance rate
+        if not (0.1 <= total_acceptance <= 1.0):  # Should be reasonable acceptance rate (constrained optimization may achieve 100%)
             print(f"❌ {impl_name}: Unreasonable acceptance rate: {total_acceptance}")
             return False
 

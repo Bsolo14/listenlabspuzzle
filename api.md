@@ -14,6 +14,8 @@ You're the bouncer at a night club. Your goal is to fill the venue with N=1000 p
 There are 3 different scenarios. For each, you are given a list of constraints and statistics on the attribute distribution. You can assume, participants are sampled i.i.d., meaning the attribute distribution will not change as the night goes on. You know the overall relative frequency of each attribute and the correlation between attributes. You don't know the exact distribution.
 You score is the number of people you rejected before filling the venue (the less the better).
 
+We can play the game as many times as we want only the highest score counts
+
 ## API
 
 1. Create a new game:

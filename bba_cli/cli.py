@@ -3,27 +3,30 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 from typing import Dict, List, Mapping
 
 from .api_client import ApiClient
 from .strategy import (
-    build_attribute_order,
+    build_attribute_order_constrained,
     compute_constraint_sets,
     correlate_binary_joint,
     correlate_binary_joint_vectorized_parallel,
     make_online_policy,
+    make_online_policy_from_primal,
     multiplicative_weights_lp,
+    solve_lp_primal,
 )
 
 
-def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool = False) -> None:
+def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool = False, use_lp: bool = False) -> None:
     api = ApiClient(base_url)
 
     # Start game and fetch stats
     init = api.new_game(scenario=scenario, player_id=player_id)
     constraints_min_count = {c.attribute: c.minCount for c in init.constraints}
 
-    attribute_order = build_attribute_order(init.relativeFrequencies)
+    attribute_order = build_attribute_order_constrained(init.relativeFrequencies, constraints_min_count)
     # Build joint distribution approximation using parallel processing
     type_probs = correlate_binary_joint_vectorized_parallel(
         attribute_order, init.relativeFrequencies, init.correlations, num_samples=150000
@@ -48,7 +51,14 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
         print(f"[debug] Total types: {len(type_probs)}")
 
     # Compute base acceptance probabilities
-    base_accept = multiplicative_weights_lp(type_probs, constraint_sets, iterations=450)
+    if use_lp:
+        print("[info] Using primal LP solver with exact r_t rates")
+        r_by_type, A_rate, lambdas = solve_lp_primal(type_probs, constraint_sets)
+        base_accept = r_by_type
+        print(f"[info] LP solution: A* = {A_rate:.3f}")
+    else:
+        print("[info] Using multiplicative weights heuristic")
+        base_accept = multiplicative_weights_lp(type_probs, constraint_sets, iterations=450)
 
     # Estimate expected rejections using A* = sum_t p_t a_t
     A_star = 0.0
@@ -84,14 +94,25 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
         accept_prob = base_accept.get(t, 0.0)
         print(f"  {attrs or ['none']}: freq={freq:.4f}, accept={accept_prob:.3f}")
 
-    step, policy_state = make_online_policy(
-        N=N,
-        attribute_order=attribute_order,
-        base_accept=base_accept,
-        constraint_sets=constraint_sets,
-        lambda_nudge=0.5,
-        safety_beta=1.0,
-    )
+    if use_lp:
+        # Set fixed seed for reproducible LP results
+        rng = random.Random(42)
+        step, policy_state = make_online_policy_from_primal(
+            N=N,
+            attribute_order=attribute_order,
+            r_by_type=base_accept,
+            constraint_sets=constraint_sets,
+            rng=rng,
+        )
+    else:
+        step, policy_state = make_online_policy(
+            N=N,
+            attribute_order=attribute_order,
+            base_accept=base_accept,
+            constraint_sets=constraint_sets,
+            lambda_nudge=0.5,
+            safety_beta=1.0,
+        )
 
     # Iterate game
     state = api.decide_and_next(init.gameId, person_index=0, accept=None)
@@ -114,13 +135,14 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Berghain Bouncer Algorithm CLI")
-    parser.add_argument("--base-url", type=str, required=True)
     parser.add_argument("--scenario", type=int, choices=[1, 2, 3], required=True)
-    parser.add_argument("--player-id", type=str, required=True)
     parser.add_argument("--N", type=int, default=1000)
     parser.add_argument("--debug", action="store_true", help="Show debug information about joint distribution")
+    parser.add_argument("--use-lp", action="store_true", help="Use primal LP solver instead of multiplicative weights (default: MW)")
     args = parser.parse_args()
-    run(base_url=args.base_url, scenario=args.scenario, player_id=args.player_id, N=args.N, debug=args.debug)
+    base_url = "https://berghain.challenges.listenlabs.ai"
+    player_id = "15f0e870-99e8-4572-a1b2-0cf0dcef4d8d"
+    run(base_url=base_url, scenario=args.scenario, player_id=player_id, N=args.N, debug=args.debug, use_lp=args.use_lp)
 
 
 if __name__ == "__main__":
