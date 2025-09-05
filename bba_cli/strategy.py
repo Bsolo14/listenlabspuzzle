@@ -21,7 +21,7 @@ def process_samples_chunk(chunk: np.ndarray, thresholds_array: np.ndarray, K: in
     """
     chunk_counts = defaultdict(int)
     for sample in chunk:
-        type_tuple = tuple(1 if sample[i] > thresholds_array[i] else 0 for i in range(K))
+        type_tuple = tuple(1 if sample[i] <= thresholds_array[i] else 0 for i in range(K))
         chunk_counts[type_tuple] += 1
     return dict(chunk_counts)
 
@@ -116,7 +116,7 @@ def correlate_binary_joint(
     # Generate binary types and count frequencies
     type_counts = defaultdict(int)
     for sample in samples:
-        type_tuple = tuple(1 if sample[i] > thresholds[i] else 0 for i in range(K))
+        type_tuple = tuple(1 if sample[i] <= thresholds[i] else 0 for i in range(K))
         type_counts[type_tuple] += 1
 
     # Convert to probabilities
@@ -236,7 +236,7 @@ def correlate_binary_joint_vectorized_parallel(
                                 for attr in attribute_order])
 
     # Vectorized binary conversion (much faster!)
-    binary_samples = (samples > thresholds_array).astype(int)
+    binary_samples = (samples <= thresholds_array).astype(int)
 
     # Use numpy's unique for counting (extremely fast)
     unique_types, counts = np.unique(binary_samples, axis=0, return_counts=True)
@@ -392,6 +392,7 @@ def make_online_policy(
     constraint_sets: Dict[AttributeId, Tuple[float, Set[TypeKey]]],
     lambda_nudge: float = 0.5,
     safety_beta: float = 1.0,
+    enable_neither_wiggle: bool = False,
 ) -> Tuple[Callable[[Mapping[AttributeId, bool]], Tuple[bool, Dict]], Dict]:
     """
     Create the online policy function.
@@ -403,6 +404,7 @@ def make_online_policy(
         'n': 0,  # Total accepted
         'c': {attr: 0 for attr in constraint_sets.keys()},  # Count per constraint
         'rejected': 0,
+        'both_young_wd': 0,  # Track how many admitted are both young and well_dressed
     }
 
     def attributes_to_type(attributes: Mapping[AttributeId, bool]) -> TypeKey:
@@ -449,6 +451,10 @@ def make_online_policy(
                 for attr in constraint_sets.keys():
                     if attributes.get(attr, False):
                         policy_state['c'][attr] += 1
+                # Update both counter if applicable
+                if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
+                    if attributes.get('young', False) and attributes.get('well_dressed', False):
+                        policy_state['both_young_wd'] += 1
                 return True, policy_state
             else:
                 # Reject - this person cannot help with any remaining constraints
@@ -472,12 +478,29 @@ def make_online_policy(
         base_prob = base_accept.get(t, 0.0)
         pi = min(1.0, base_prob * (1.0 + lambda_nudge * s))
 
+        # Special handling: if this person is neither young nor well_dressed, optionally accept with alpha
+        if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
+            is_young = bool(attributes.get('young', False))
+            is_wd = bool(attributes.get('well_dressed', False))
+            is_neither = (not is_young) and (not is_wd)
+            if is_neither and policy_state['n'] > 0:
+                both_frac = policy_state['both_young_wd'] / max(1, policy_state['n'])
+                alpha = max(both_frac - (200.0 / float(N)), 0.0)
+                # Ensure alpha within [0,1]
+                alpha = min(alpha, 1.0)
+                # Elevate probability to at least alpha
+                pi = max(pi, alpha)
+
         # Make decision
         if random.random() < pi:
             policy_state['n'] += 1
             for attr in constraint_sets.keys():
                 if attributes.get(attr, False):
                     policy_state['c'][attr] += 1
+            # Update both counter if applicable
+            if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
+                if attributes.get('young', False) and attributes.get('well_dressed', False):
+                    policy_state['both_young_wd'] += 1
             return True, policy_state
         else:
             policy_state['rejected'] += 1
@@ -492,13 +515,14 @@ def make_online_policy_from_primal(
     r_by_type: Dict[TypeKey, float],
     constraint_sets: Dict[AttributeId, Tuple[float, Set[TypeKey]]],
     rng: random.Random,
+    enable_neither_wiggle: bool = False,
 ):
     """
     Create online policy using primal LP rates r_t.
 
     Returns (step_function, initial_policy_state)
     """
-    state = {'n': 0, 'rejected': 0, 'c': {a: 0 for a in constraint_sets}}
+    state = {'n': 0, 'rejected': 0, 'c': {a: 0 for a in constraint_sets}, 'both_young_wd': 0}
 
     def to_type_key(attrs: Mapping[AttributeId, bool]) -> TypeKey:
         return tuple(1 if attrs.get(a, False) else 0 for a in attribute_order)
@@ -525,17 +549,32 @@ def make_online_policy_from_primal(
 
         # --- stationary thinning from the LP ---
         rt = r_by_type.get(t, 0.0)
-        if rt >= 1.0 - 1e-9:
+        pi = rt
+        # Special handling: if this person is neither young nor well_dressed, optionally accept with alpha
+        if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
+            is_young = bool(attrs.get('young', False))
+            is_wd = bool(attrs.get('well_dressed', False))
+            is_neither = (not is_young) and (not is_wd)
+            if is_neither and state['n'] > 0:
+                both_frac = state['both_young_wd'] / max(1, state['n'])
+                alpha = max(both_frac - (200.0 / float(N)), 0.0)
+                alpha = min(alpha, 1.0)
+                pi = max(pi, alpha)
+
+        if pi >= 1.0 - 1e-9:
             accept = True
-        elif rt <= 1e-9:
+        elif pi <= 1e-9:
             accept = False
         else:
-            accept = (rng.random() < rt)
+            accept = (rng.random() < pi)
 
         if accept:
             state['n'] += 1
             for a in constraint_sets:
                 if attrs.get(a, False): state['c'][a] += 1
+            if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
+                if attrs.get('young', False) and attrs.get('well_dressed', False):
+                    state['both_young_wd'] += 1
             return True, state
         else:
             state['rejected'] += 1

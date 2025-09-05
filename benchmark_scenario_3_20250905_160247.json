@@ -1,0 +1,28 @@
+{
+  "Multiplicative Weights": {
+    "config_name": "Multiplicative Weights",
+    "num_runs": 2,
+    "successes": 0,
+    "failed_games": 2,
+    "success_rate": 0.0,
+    "avg_rejections": 0,
+    "min_rejections": 0,
+    "max_rejections": 0,
+    "median_rejections": 0,
+    "total_time": 0.14182209968566895,
+    "avg_time_per_game": 0.07091104984283447
+  },
+  "LP Solver": {
+    "config_name": "LP Solver",
+    "num_runs": 2,
+    "successes": 0,
+    "failed_games": 2,
+    "success_rate": 0.0,
+    "avg_rejections": 0,
+    "min_rejections": 0,
+    "max_rejections": 0,
+    "median_rejections": 0,
+    "total_time": 0.13155126571655273,
+    "avg_time_per_game": 0.06577563285827637
+  }
+}

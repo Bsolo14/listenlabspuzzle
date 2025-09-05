@@ -69,6 +69,13 @@ class ApiClient:
                 nextPerson=next_person,
             )
         else:
-            return CompletedState(status=status, rejectedCount=data["rejectedCount"], nextPerson=None)
+            # The API may include a reason on failure; include if present
+            return CompletedState(
+                status=status,
+                rejectedCount=data.get("rejectedCount", 0),
+                nextPerson=None,
+                reason=data.get("reason"),
+                admittedAttributes=data.get("admittedAttributes"),
+            )
 
 

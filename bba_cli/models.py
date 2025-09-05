@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Tuple, Union
+from typing import Dict, List, Mapping, Tuple, Union, Optional
 
 
 AttributeId = str
@@ -41,6 +41,8 @@ class CompletedState:
     status: str
     rejectedCount: int
     nextPerson: None
+    reason: Optional[str] = None
+    admittedAttributes: Optional[Dict[AttributeId, int]] = None
 
 
 ApiState = Union[RunningState, CompletedState]
