@@ -7,3 +7,5 @@ __pycache__/
 *.pyz
 *.py
 bba_cli/__pycache__/
+
+.env
