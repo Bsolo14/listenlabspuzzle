@@ -10,10 +10,10 @@ Usage
   pip install -r requirements.txt
 
 - Run:
-  python -m bba_cli --scenario 1 --player-id YOUR_UUID --base-url http://localhost:3000
+  python -m bba_cli --scenario 1 --player-id YOUR_UUID --simulated  # embedded simulator (no server)
 
 - Run with debug info:
-  python -m bba_cli --scenario 1 --player-id YOUR_UUID --base-url http://localhost:3000 --debug
+  python -m bba_cli --scenario 1 --player-id YOUR_UUID --simulated  # embedded simulator (no server) --debug
 
 Description
 
@@ -30,3 +30,5 @@ Features
 - Graceful handling of potentially infeasible scenarios
 
 
+
+Note: Use --simulated to run against the embedded simulator (no local server needed).

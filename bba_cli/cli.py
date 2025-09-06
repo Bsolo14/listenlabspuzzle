@@ -7,6 +7,7 @@ import random
 from typing import Dict, List, Mapping
 
 from .api_client import ApiClient
+from .embedded_api_client import EmbeddedApiClient
 from .strategy import (
     build_attribute_order_constrained,
     compute_constraint_sets,
@@ -18,8 +19,8 @@ from .strategy import (
 )
 
 
-def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool = False, use_lp: bool = True, quiet: bool = False, neither_wiggle: bool = False) -> None:
-    api = ApiClient(base_url)
+def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool = False, use_lp: bool = True, quiet: bool = False, neither_wiggle: bool = False, use_embedded: bool = False) -> None:
+    api = EmbeddedApiClient() if use_embedded else ApiClient(base_url)
 
     # Start game and fetch stats
     init = api.new_game(scenario=scenario, player_id=player_id)
@@ -31,7 +32,7 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
         attribute_order=attribute_order,
         relative_frequencies=init.relativeFrequencies,
         correlations=init.correlations,
-        num_samples=150000,
+        num_samples=500000,
     )
 
     # Use the original constraints (no marginal capping). LP will throttle types as needed.
@@ -116,6 +117,7 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
 
         # Set fixed seed for reproducible LP results
         rng = random.Random(42)
+        
         step, policy_state = make_online_policy_from_primal(
             N=N,
             attribute_order=attribute_order,
@@ -123,6 +125,8 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
             constraint_sets=constraint_sets,
             rng=rng,
             reserve_trigger_n=reserve_trigger_n,
+            type_probs=type_probs,
+            dynamic_resolve=True,
         )
     else:
         step, policy_state = make_online_policy(
@@ -163,24 +167,27 @@ def main() -> None:
     parser.add_argument("--scenario", type=int, choices=[1, 2, 3], required=True)
     parser.add_argument("--N", type=int, default=1000)
     parser.add_argument("--debug", action="store_true", help="Show debug information about joint distribution")
+    
     parser.add_argument("--use-mw", action="store_true", help="Use multiplicative weights instead of primal LP solver (default: LP)")
+    
     parser.add_argument("--simulated", action="store_true", help="Use simulated API instead of real API")
     parser.add_argument("--quiet", action="store_true", help="Reduce output for benchmarking")
     parser.add_argument("--neither-wiggle", action="store_true", help="Enable 'neither' acceptance with wiggle alpha rule")
+    
     args = parser.parse_args()
 
     if args.simulated:
-        base_url = "http://localhost:5000"
+        base_url = "embedded"
         if not args.quiet:
-            print("[info] Using simulated API at", base_url)
+            print("[info] Using embedded simulated API (no HTTP)")
+        use_embedded = True
     else:
         base_url = "https://berghain.challenges.listenlabs.ai"
+        use_embedded = False
 
     player_id = "15f0e870-99e8-4572-a1b2-0cf0dcef4d8d"
-    run(base_url=base_url, scenario=args.scenario, player_id=player_id, N=args.N, debug=args.debug, use_lp=not args.use_mw, quiet=args.quiet, neither_wiggle=args.neither_wiggle)
+    run(base_url=base_url, scenario=args.scenario, player_id=player_id, N=args.N, debug=args.debug, use_lp=not args.use_mw, quiet=args.quiet, neither_wiggle=args.neither_wiggle, use_embedded=use_embedded)
 
 
 if __name__ == "__main__":
     main()
-
-

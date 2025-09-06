@@ -516,14 +516,36 @@ def make_online_policy_from_primal(
     constraint_sets: Dict[AttributeId, Tuple[float, Set[TypeKey]]],
     rng: random.Random,
     enable_neither_wiggle: bool = False,
-    reserve_trigger_n: Optional[int] = None,
-):
+    reserve_trigger_n: Optional[int] = None, type_probs: Optional[Dict[TypeKey, float]] = None, dynamic_resolve: bool = False):
     """
     Create online policy using primal LP rates r_t.
 
     Returns (step_function, initial_policy_state)
     """
     state = {'n': 0, 'rejected': 0, 'c': {a: 0 for a in constraint_sets}, 'both_young_wd': 0}
+
+    current_r_by_type = dict(r_by_type)
+    # Precompute attribute marginal probabilities from type_probs for urgency
+    attr_prob = {}
+    if type_probs is not None:
+        for a, (_, S) in constraint_sets.items():
+            attr_prob[a] = sum(type_probs.get(t, 0.0) for t in S)
+    else:
+        for a in constraint_sets.keys():
+            attr_prob[a] = 0.0
+
+    def resolve_now(R: int, r_need: dict):
+        nonlocal current_r_by_type
+        if not dynamic_resolve or type_probs is None or R <= 0:
+            return
+        dyn_constraint_sets = {}
+        for a, (_, S) in constraint_sets.items():
+            alpha_hat = float(r_need[a]) / float(R)
+            alpha_hat = 0.0 if alpha_hat < 0.0 else (1.0 if alpha_hat > 1.0 else alpha_hat)
+            dyn_constraint_sets[a] = (alpha_hat, S)
+        new_r, _, _ = solve_lp_primal(type_probs, dyn_constraint_sets)
+        current_r_by_type = new_r
+
 
     def to_type_key(attrs: Mapping[AttributeId, bool]) -> TypeKey:
         return tuple(1 if attrs.get(a, False) else 0 for a in attribute_order)
@@ -532,17 +554,53 @@ def make_online_policy_from_primal(
         nonlocal state
         t = to_type_key(attrs)
 
-        # --- endgame lock (use the fixed version from change #2) ---
+        # --- endgame lock and reserve logic ---
         R = N - state['n']
         r_need = {a: max(0, math.ceil(alpha * N) - state['c'][a]) for a, (alpha, _) in constraint_sets.items()}
         forced_mode = (sum(r_need.values()) >= R) or any(v == R for v in r_need.values())
+        resolve_now(R, r_need)
         # Engage reserve mode early once we have spent the budget implied by A_max
         if reserve_trigger_n is not None and state['n'] >= reserve_trigger_n:
             forced_mode = True
 
+        # If all constraints satisfied already, accept to fill capacity
+        if sum(r_need.values()) == 0 and R > 0:
+            state['n'] += 1
+            for a in constraint_sets:
+                if attrs.get(a, False): state['c'][a] += 1
+            if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
+                if attrs.get('young', False) and attrs.get('well_dressed', False):
+                    state['both_young_wd'] += 1
+            return True, state
+        # Compute urgency ratios (need over expected supply)
+        urg = {}
+        for a in constraint_sets:
+            pj = attr_prob.get(a, 0.0)
+            denom = (pj * R) if R > 0 else 0.0
+            if denom <= 1e-12:
+                denom = 1e-12
+            urg[a] = r_need[a] / denom
+        u_max = max(urg.values()) if urg else 0.0
+        eps = 0.01
+        top_attrs = [a for a in constraint_sets if r_need[a] > 0 and urg[a] >= u_max - eps]
+
         if forced_mode:
-            helps = any(r_need[a] > 0 and attrs.get(a, False) for a in constraint_sets)
-            if helps:
+            # In reserve/forced mode, only consider candidates that help the most urgent constraints
+            if not any(attrs.get(a, False) for a in top_attrs):
+                state['rejected'] += 1
+                return False, state
+            # Use dynamically re-solved LP rates with urgency bias
+            rt_fm = current_r_by_type.get(t, 0.0)
+            gamma_fm = 0.75 / max(1, len(constraint_sets))
+            bias_fm = sum(urg[a] for a in top_attrs if attrs.get(a, False))
+            pi = min(1.0, rt_fm * (1.0 + gamma_fm * bias_fm))
+            if pi >= 1.0 - 1e-9:
+                accept = True
+            elif pi <= 1e-9:
+                accept = False
+            else:
+                accept = (rng.random() < pi)
+            if accept:
                 state['n'] += 1
                 for a in constraint_sets:
                     if attrs.get(a, False): state['c'][a] += 1
@@ -551,9 +609,15 @@ def make_online_policy_from_primal(
                 state['rejected'] += 1
                 return False, state
 
-        # --- stationary thinning from the LP ---
-        rt = r_by_type.get(t, 0.0)
-        pi = rt
+        # --- deficit-weighted stationary thinning from the LP ---
+        rt = current_r_by_type.get(t, 0.0)
+        gamma = 0.5 / max(1, len(constraint_sets))
+        bias = sum(urg[a] for a in constraint_sets if attrs.get(a, False))
+        pi = min(1.0, rt * (1.0 + gamma * bias))
+
+        if sum(r_need.values()) > 0 and not any(attrs.get(a, False) for a in top_attrs):
+            pi = 0.0
+
         # Special handling: if this person is neither young nor well_dressed, optionally accept with alpha
         if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
             is_young = bool(attrs.get('young', False))

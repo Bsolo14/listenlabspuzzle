@@ -1,0 +1,28 @@
+{
+  "LP Solver": {
+    "config_name": "LP Solver",
+    "num_runs": 10,
+    "successes": 0,
+    "failed_games": 10,
+    "success_rate": 0.0,
+    "avg_rejections": 0,
+    "min_rejections": 0,
+    "max_rejections": 0,
+    "median_rejections": 0,
+    "total_time": 0.5741770267486572,
+    "avg_time_per_game": 0.05741770267486572
+  },
+  "LP Solver + Neither Wiggle": {
+    "config_name": "LP Solver + Neither Wiggle",
+    "num_runs": 10,
+    "successes": 0,
+    "failed_games": 10,
+    "success_rate": 0.0,
+    "avg_rejections": 0,
+    "min_rejections": 0,
+    "max_rejections": 0,
+    "median_rejections": 0,
+    "total_time": 0.5633220672607422,
+    "avg_time_per_game": 0.05633220672607422
+  }
+}
