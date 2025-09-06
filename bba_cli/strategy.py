@@ -474,9 +474,9 @@ def make_online_policy(
         s = sum(w[attr] for attr in constraint_sets.keys()
                 if attributes.get(attr, False) is True)
 
-        # Probabilistic admission with nudge
+        # Probabilistic admission with increased nudge for better deficit handling
         base_prob = base_accept.get(t, 0.0)
-        pi = min(1.0, base_prob * (1.0 + lambda_nudge * s))
+        pi = min(1.0, base_prob * (1.0 + 1.2 * lambda_nudge * s))
 
         # Special handling: if this person is neither young nor well_dressed, optionally accept with alpha
         if enable_neither_wiggle and ('young' in attribute_order and 'well_dressed' in attribute_order):
@@ -591,7 +591,7 @@ def make_online_policy_from_primal(
                 return False, state
             # Use dynamically re-solved LP rates with urgency bias
             rt_fm = current_r_by_type.get(t, 0.0)
-            gamma_fm = 0.75 / max(1, len(constraint_sets))
+            gamma_fm = 0.7 / max(1, len(constraint_sets))  # Slightly more aggressive forced mode
             bias_fm = sum(urg[a] for a in top_attrs if attrs.get(a, False))
             pi = min(1.0, rt_fm * (1.0 + gamma_fm * bias_fm))
             if pi >= 1.0 - 1e-9:
@@ -611,7 +611,7 @@ def make_online_policy_from_primal(
 
         # --- deficit-weighted stationary thinning from the LP ---
         rt = current_r_by_type.get(t, 0.0)
-        gamma = 0.5 / max(1, len(constraint_sets))
+        gamma = 0.7 / max(1, len(constraint_sets))  # Slightly more aggressive gamma
         bias = sum(urg[a] for a in constraint_sets if attrs.get(a, False))
         pi = min(1.0, rt * (1.0 + gamma * bias))
 

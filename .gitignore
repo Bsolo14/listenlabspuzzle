@@ -5,7 +5,7 @@ __pycache__/
 *.pyd
 *.pyw
 *.pyz
-*.py
 bba_cli/__pycache__/
 
 .env
+external/berghain-challenge/

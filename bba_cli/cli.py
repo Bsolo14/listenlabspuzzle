@@ -8,6 +8,7 @@ from typing import Dict, List, Mapping
 
 from .api_client import ApiClient
 from .embedded_api_client import EmbeddedApiClient
+from .outsourced_api_client import OutsourcedApiClient
 from .strategy import (
     build_attribute_order_constrained,
     compute_constraint_sets,
@@ -19,8 +20,13 @@ from .strategy import (
 )
 
 
-def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool = False, use_lp: bool = True, quiet: bool = False, neither_wiggle: bool = False, use_embedded: bool = False) -> None:
-    api = EmbeddedApiClient() if use_embedded else ApiClient(base_url)
+def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool = False, use_lp: bool = True, quiet: bool = False, neither_wiggle: bool = False, use_embedded: bool = False, use_outsourced: bool = False) -> None:
+    if use_outsourced:
+        api = OutsourcedApiClient(scenario=scenario)
+    elif use_embedded:
+        api = EmbeddedApiClient()
+    else:
+        api = ApiClient(base_url)
 
     # Start game and fetch stats
     init = api.new_game(scenario=scenario, player_id=player_id)
@@ -113,7 +119,7 @@ def run(base_url: str, scenario: int, player_id: str, N: int = 1000, debug: bool
             if alpha > 0:
                 A_max_candidates.append(attr_prob[attr] / alpha)
         A_max = min(A_max_candidates) if A_max_candidates else 1.0
-        reserve_trigger_n = int(max(0, min(N, math.floor(A_max * N))))
+        reserve_trigger_n = int(max(0, min(N, math.floor(A_max * N))))  # Back to original reserve trigger
 
         # Set fixed seed for reproducible LP results
         rng = random.Random(42)
@@ -170,23 +176,32 @@ def main() -> None:
     
     parser.add_argument("--use-mw", action="store_true", help="Use multiplicative weights instead of primal LP solver (default: LP)")
     
-    parser.add_argument("--simulated", action="store_true", help="Use simulated API instead of real API")
+    parser.add_argument("--simulated", action="store_true", help="Use embedded simulated API instead of real API")
+    parser.add_argument("--simulate-outsourced", action="store_true", help="Use outsourced simulator from external/berghain-challenge")
     parser.add_argument("--quiet", action="store_true", help="Reduce output for benchmarking")
     parser.add_argument("--neither-wiggle", action="store_true", help="Enable 'neither' acceptance with wiggle alpha rule")
     
     args = parser.parse_args()
 
-    if args.simulated:
+    if args.simulate_outsourced:
+        base_url = "outsourced"
+        if not args.quiet:
+            print("[info] Using outsourced simulator from external/berghain-challenge")
+        use_outsourced = True
+        use_embedded = False
+    elif args.simulated:
         base_url = "embedded"
         if not args.quiet:
             print("[info] Using embedded simulated API (no HTTP)")
         use_embedded = True
+        use_outsourced = False
     else:
         base_url = "https://berghain.challenges.listenlabs.ai"
         use_embedded = False
+        use_outsourced = False
 
     player_id = "15f0e870-99e8-4572-a1b2-0cf0dcef4d8d"
-    run(base_url=base_url, scenario=args.scenario, player_id=player_id, N=args.N, debug=args.debug, use_lp=not args.use_mw, quiet=args.quiet, neither_wiggle=args.neither_wiggle, use_embedded=use_embedded)
+    run(base_url=base_url, scenario=args.scenario, player_id=player_id, N=args.N, debug=args.debug, use_lp=not args.use_mw, quiet=args.quiet, neither_wiggle=args.neither_wiggle, use_embedded=use_embedded, use_outsourced=use_outsourced)
 
 
 if __name__ == "__main__":
