@@ -8,11 +8,7 @@ from typing import Dict, Optional
 
 from .models import GameInit, NextPerson, RunningState, CompletedState
 
-# Add the external simulator to the path
-external_simulator_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'external', 'berghain-challenge')
-sys.path.insert(0, external_simulator_path)
-
-from simulation_engine import SimulationEngine
+from .simulation_engine import SimulationEngine
 
 
 class OutsourcedApiClient:
